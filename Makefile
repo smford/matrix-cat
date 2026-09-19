@@ -1,4 +1,4 @@
-BINARY_NAME := matrix-cat
+BINARY_NAME := mcat
 BIN_DIR := bin
 VERSION ?= 1.0.0
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -11,10 +11,10 @@ all: build
 
 build:
 	@mkdir -p $(BIN_DIR)
-	go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY_NAME) ./cmd/matrix-cat
+	go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY_NAME) ./cmd/mcat
 
 run:
-	go run ./cmd/matrix-cat
+	go run ./cmd/mcat
 
 test:
 	go test -v ./...

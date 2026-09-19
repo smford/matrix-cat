@@ -41,37 +41,6 @@ type TargetCell struct {
 	Col     int
 }
 
-// Config encapsulates runtime parameters for the Matrix rain simulation.
-type Config struct {
-	FPS             int
-	Density         int     // 1 - 100
-	SpeedScale      float64 // Multiplier for drop speeds (e.g., 0.5x - 3.0x)
-	ThemeName       string
-	CharSetName     string
-	BoldHead        bool
-	FilePath        string  // Optional path to text file
-	FileContent     []byte  // Optional raw text content
-	Center          bool    // Center text on screen
-	Loop            bool    // Keep ambient rain falling after text settles
-	TabWidth        int     // Width of tab expansion (default 4)
-	SyntaxHighlight bool    // Enable syntax highlighting (default true)
-	SyntaxTheme     string  // Syntax theme (e.g. monokai, dracula, nord, etc.)
-}
-
-// DefaultConfig returns production-ready default settings.
-func DefaultConfig() Config {
-	return Config{
-		FPS:             30,
-		Density:         50,
-		SpeedScale:      1.0,
-		ThemeName:       "green",
-		CharSetName:     string(CharSetMatrix),
-		BoldHead:        true,
-		TabWidth:        4,
-		SyntaxHighlight: true,
-		SyntaxTheme:     "monokai",
-	}
-}
 
 // Cell represents one terminal character grid cell.
 type Cell struct {
