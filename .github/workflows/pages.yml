@@ -6,10 +6,24 @@ on:
     paths:
       - 'docs/**'
       - '.github/workflows/pages.yml'
+      - 'scripts/update-docs-version.sh'
+  release:
+    types: [published]
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to deploy (e.g. v1.1.1, defaults to latest tag)'
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version tag to deploy'
+        required: false
+        type: string
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -19,13 +33,47 @@ concurrency:
 
 jobs:
   deploy:
+    name: Sync Version & Deploy Pages
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync documentation version
+        run: |
+          TARGET_TAG="${{ inputs.version || github.event.release.tag_name || github.event.inputs.version }}"
+          if [ -z "$TARGET_TAG" ]; then
+            git fetch --tags --force
+            TARGET_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          fi
+
+          if [ -n "$TARGET_TAG" ]; then
+            echo "Synchronizing documentation with version: $TARGET_TAG"
+            chmod +x ./scripts/update-docs-version.sh
+            ./scripts/update-docs-version.sh "$TARGET_TAG"
+
+            # Commit and push if docs were modified
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add docs/index.html
+            if ! git diff --staged --quiet; then
+              echo "Committing updated docs/index.html ($TARGET_TAG) to main..."
+              git commit -m "chore(docs): sync version badge to ${TARGET_TAG} [skip ci]"
+              git pull --rebase origin main || true
+              git push origin main
+            else
+              echo "docs/index.html is already up-to-date with $TARGET_TAG."
+            fi
+          else
+            echo "Warning: No release tag found; deploying docs as-is."
+          fi
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

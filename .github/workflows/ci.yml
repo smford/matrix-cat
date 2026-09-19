@@ -10,6 +10,16 @@ permissions:
   contents: read
 
 jobs:
+  shellcheck:
+    name: Lint Shell Scripts (ShellCheck)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        run: shellcheck scripts/*.sh
+
   test:
     name: Test & Lint
     runs-on: ${{ matrix.os }}

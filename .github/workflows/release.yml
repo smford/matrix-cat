@@ -13,6 +13,7 @@ on:
       - 'Formula/**'
       - '.github/workflows/pages.yml'
       - '.gitignore'
+      - 'scripts/**'
   workflow_dispatch:
     inputs:
       bump_type:
@@ -35,6 +36,9 @@ jobs:
   release:
     name: Build, Release & Publish to Homebrew
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.semver.outputs.tag }}
+      skipped: ${{ steps.semver.outputs.skipped }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -73,7 +77,7 @@ jobs:
 
           # Verify that codebase files changed since the previous tag
           if [ "$LATEST_TAG" != "v0.0.0" ] && [ -z "${{ github.event.inputs.bump_type }}" ]; then
-            CHANGED_CODE=$(git diff --name-only ${LATEST_TAG}..HEAD -- ':(exclude)docs' ':(exclude)*.md' ':(exclude)LICENSE' ':(exclude)Formula' ':(exclude).github/workflows/pages.yml' ':(exclude).gitignore')
+            CHANGED_CODE=$(git diff --name-only ${LATEST_TAG}..HEAD -- ':(exclude)docs' ':(exclude)*.md' ':(exclude)LICENSE' ':(exclude)Formula' ':(exclude).github/workflows/pages.yml' ':(exclude).gitignore' ':(exclude)scripts')
             if [ -z "$CHANGED_CODE" ]; then
               echo "No codebase changes detected since $LATEST_TAG. Skipping release."
               echo "skipped=true" >> $GITHUB_OUTPUT
@@ -141,3 +145,35 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN || secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Update documentation with released version
+        if: steps.semver.outputs.skipped != 'true'
+        run: |
+          TAG="${{ steps.semver.outputs.tag }}"
+          echo "Updating documentation for release: $TAG"
+          chmod +x ./scripts/update-docs-version.sh
+          ./scripts/update-docs-version.sh "$TAG"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/index.html
+          if ! git diff --staged --quiet; then
+            echo "Committing updated docs/index.html ($TAG) to main..."
+            git commit -m "chore(docs): update version badge to ${TAG} [skip ci]"
+            git pull --rebase origin main || true
+            git push origin HEAD:main
+          else
+            echo "docs/index.html is already up-to-date with $TAG."
+          fi
+
+  deploy-pages:
+    name: Deploy GitHub Pages
+    needs: release
+    if: needs.release.outputs.skipped != 'true' && !cancelled() && needs.release.result == 'success'
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml
+    with:
+      version: ${{ needs.release.outputs.tag }}

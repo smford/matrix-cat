@@ -80,6 +80,14 @@
       background: var(--bg-card);
       color: var(--primary);
       backdrop-filter: blur(10px);
+      text-decoration: none;
+      transition: all 0.2s ease;
+    }
+
+    .badge:hover {
+      border-color: var(--border-bright);
+      box-shadow: 0 0 12px oklch(0.85 0.24 145 / 0.25);
+      transform: translateY(-1px);
     }
 
     h1 {
@@ -295,13 +303,18 @@
 
   <main class="container">
     <header>
-      <div class="badge">v1.0.0 • Pure Go • Zero Bloat</div>
+      <a href="https://github.com/smford/matrix-cat/releases" class="badge" id="version-badge" title="View releases on GitHub" target="_blank" rel="noopener">
+        <span id="release-version">v1.1.1</span> • Pure Go • Zero Bloat
+      </a>
       <h1>matrix<span>-cat</span></h1>
       <p class="subtitle">Authentic green digital rain terminal simulator with half-width Katakana, in-place mutations, 24-bit Truecolor gradients, and zero terminal leaks.</p>
       
       <div class="actions">
         <a href="https://github.com/smford/matrix-cat" class="btn btn-primary" target="_blank" rel="noopener">
           View on GitHub
+        </a>
+        <a href="https://github.com/smford/matrix-cat/releases" class="btn btn-secondary" target="_blank" rel="noopener">
+          Releases
         </a>
         <a href="https://github.com/smford/homebrew-tap" class="btn btn-secondary" target="_blank" rel="noopener">
           Homebrew Tap
@@ -511,6 +524,51 @@
       if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
         requestAnimationFrame(draw);
       }
+    })();
+
+    // Progressive enhancement: fetch latest release asynchronously if newer (cached for 1h)
+    (function syncLatestRelease() {
+      const STORAGE_KEY = 'mcat_latest_release';
+      const EXPIRY_KEY = 'mcat_release_checked_at';
+      const ONE_HOUR = 3600 * 1000;
+
+      function updateBadge(tag) {
+        if (!tag) return;
+        const versionEl = document.getElementById('release-version');
+        if (versionEl && versionEl.textContent !== tag) {
+          versionEl.textContent = tag;
+        }
+        const badgeEl = document.getElementById('version-badge');
+        if (badgeEl) {
+          badgeEl.href = 'https://github.com/smford/matrix-cat/releases/tag/' + encodeURIComponent(tag);
+        }
+      }
+
+      try {
+        const cachedTag = sessionStorage.getItem(STORAGE_KEY);
+        const lastChecked = parseInt(sessionStorage.getItem(EXPIRY_KEY) || '0', 10);
+        const now = Date.now();
+
+        if (cachedTag && (now - lastChecked < ONE_HOUR)) {
+          updateBadge(cachedTag);
+          return;
+        }
+
+        fetch('https://api.github.com/repos/smford/matrix-cat/releases/latest', {
+          headers: { 'Accept': 'application/vnd.github.v3+json' }
+        })
+        .then(function(res) { return res.ok ? res.json() : null; })
+        .then(function(data) {
+          if (data && data.tag_name) {
+            sessionStorage.setItem(STORAGE_KEY, data.tag_name);
+            sessionStorage.setItem(EXPIRY_KEY, now.toString());
+            updateBadge(data.tag_name);
+          }
+        })
+        .catch(function() {
+          // Gracefully fallback to baked-in static tag
+        });
+      } catch (_) {}
     })();
   </script>
 </body>
