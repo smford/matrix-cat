@@ -1,0 +1,143 @@
+name: Release & Publish
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'LICENSE'
+      - 'Formula/**'
+      - '.github/workflows/pages.yml'
+      - '.gitignore'
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Semantic Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  packages: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release:
+    name: Build, Release & Publish to Homebrew
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine and Apply SemVer Tag
+        id: semver
+        run: |
+          # Fetch all tags from remote
+          git fetch --tags --force
+
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "Triggered by existing tag: ${{ github.ref_name }}"
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check if the current commit already has a tag pointing to it
+          EXISTING_TAG=$(git tag --points-at HEAD)
+          if [ -n "$EXISTING_TAG" ]; then
+            echo "Commit already tagged as: $EXISTING_TAG"
+            echo "tag=$EXISTING_TAG" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Find the latest semver tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "Latest tag found: $LATEST_TAG"
+
+          # Verify that codebase files changed since the previous tag
+          if [ "$LATEST_TAG" != "v0.0.0" ] && [ -z "${{ github.event.inputs.bump_type }}" ]; then
+            CHANGED_CODE=$(git diff --name-only ${LATEST_TAG}..HEAD -- ':(exclude)docs' ':(exclude)*.md' ':(exclude)LICENSE' ':(exclude)Formula' ':(exclude).github/workflows/pages.yml' ':(exclude).gitignore')
+            if [ -z "$CHANGED_CODE" ]; then
+              echo "No codebase changes detected since $LATEST_TAG. Skipping release."
+              echo "skipped=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+
+          VERSION=${LATEST_TAG#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          MAJOR=${MAJOR:-0}
+          MINOR=${MINOR:-0}
+          PATCH=${PATCH:-0}
+
+          BUMP="${{ github.event.inputs.bump_type }}"
+          if [ -z "$BUMP" ]; then
+            COMMITS=$(git log ${LATEST_TAG}..HEAD --oneline 2>/dev/null || git log --oneline)
+            if echo "$COMMITS" | grep -qE "breaking|!:"; then
+              BUMP="major"
+            elif echo "$COMMITS" | grep -qE "^[a-f0-9]+ feat"; then
+              BUMP="minor"
+            else
+              BUMP="patch"
+            fi
+          fi
+
+          if [ "$LATEST_TAG" = "v0.0.0" ]; then
+            NEW_TAG="v1.0.0"
+          else
+            case "$BUMP" in
+              major)
+                MAJOR=$((MAJOR + 1))
+                MINOR=0
+                PATCH=0
+                ;;
+              minor)
+                MINOR=$((MINOR + 1))
+                PATCH=0
+                ;;
+              patch)
+                PATCH=$((PATCH + 1))
+                ;;
+            esac
+            NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          fi
+
+          echo "Calculated new version tag: $NEW_TAG"
+          git tag "$NEW_TAG"
+          git push origin "$NEW_TAG"
+          echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
+
+      - name: Set up Go
+        if: steps.semver.outputs.skipped != 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          check-latest: true
+
+      - name: Run GoReleaser
+        if: steps.semver.outputs.skipped != 'true'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

@@ -1,0 +1,72 @@
+version: 2
+
+project_name: matrix-cat
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: matrix-cat
+    main: ./cmd/matrix-cat
+    binary: matrix-cat
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - 'merge conflict'
+      - Merge pull request
+      - Merge branch
+
+brews:
+  - name: matrix-cat
+    repository:
+      owner: smford
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://smford.github.io/matrix-cat"
+    description: "Authentic Matrix digital rain terminal simulator written in Go"
+    license: "MIT"
+    commit_author:
+      name: smford
+      email: s.m.ford@gmail.com
+    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
+    test: |
+      system "#{bin}/matrix-cat", "-version"
