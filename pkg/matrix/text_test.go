@@ -299,6 +299,163 @@ func TestThemeSettledColor(t *testing.T) {
 	}
 }
 
+func TestEngineSearch(t *testing.T) {
+	var buf bytes.Buffer
+	cfg := DefaultConfig()
+	content := "first target match\nsecond line\nthird TARGET match\nfourth line\nfifth target match"
+	cfg.FileContent = []byte(content)
+
+	engine := NewEngine(cfg, &buf)
+	engine.resize(40, 10)
+
+	// Execute search for "target" (case-insensitive)
+	engine.searchQuery = "target"
+	engine.executeSearch()
+
+	if len(engine.searchMatches) != 3 {
+		t.Fatalf("expected 3 matches for 'target', got %d", len(engine.searchMatches))
+	}
+	if engine.currentMatch != 0 {
+		t.Errorf("expected currentMatch to start at 0, got %d", engine.currentMatch)
+	}
+
+	// Active match check
+	firstMatch := engine.searchMatches[0]
+	matched, active := engine.isMatch(firstMatch.Line, firstMatch.Col)
+	if !matched || !active {
+		t.Errorf("expected first match to be matched and active, got matched=%v, active=%v", matched, active)
+	}
+
+	// Next match with 'n'
+	engine.handleInput('n')
+	if engine.currentMatch != 1 {
+		t.Errorf("expected currentMatch=1 after 'n', got %d", engine.currentMatch)
+	}
+
+	// Next match with 'n' again
+	engine.handleInput('n')
+	if engine.currentMatch != 2 {
+		t.Errorf("expected currentMatch=2 after second 'n', got %d", engine.currentMatch)
+	}
+
+	// Next match with 'n' wraps around to 0
+	engine.handleInput('n')
+	if engine.currentMatch != 0 {
+		t.Errorf("expected currentMatch=0 after wrap-around 'n', got %d", engine.currentMatch)
+	}
+
+	// Previous match with 'p' wraps around to 2
+	engine.handleInput('p')
+	if engine.currentMatch != 2 {
+		t.Errorf("expected currentMatch=2 after 'p' wrap-around, got %d", engine.currentMatch)
+	}
+
+	// Previous match with 'p' goes to 1
+	engine.handleInput('p')
+	if engine.currentMatch != 1 {
+		t.Errorf("expected currentMatch=1 after 'p', got %d", engine.currentMatch)
+	}
+}
+
+func TestEngineSearchInteractiveInput(t *testing.T) {
+	var buf bytes.Buffer
+	cfg := DefaultConfig()
+	content := "hello world\nmatrix digital rain\nsearch test"
+	cfg.FileContent = []byte(content)
+
+	engine := NewEngine(cfg, &buf)
+	engine.resize(40, 10)
+
+	// Type '/' to start search
+	engine.handleInput('/')
+	if !engine.searching {
+		t.Errorf("expected engine.searching to be true after '/'")
+	}
+
+	// Type "rain" with a typo: 'r', 'a', 'i', 'x', Backspace, 'n'
+	engine.handleInput('r')
+	engine.handleInput('a')
+	engine.handleInput('i')
+	engine.handleInput('x')
+	if engine.searchQuery != "raix" {
+		t.Errorf("expected searchQuery 'raix', got %q", engine.searchQuery)
+	}
+
+	// Backspace
+	engine.handleInput(127)
+	if engine.searchQuery != "rai" {
+		t.Errorf("expected searchQuery 'rai' after backspace, got %q", engine.searchQuery)
+	}
+
+	engine.handleInput('n')
+	if engine.searchQuery != "rain" {
+		t.Errorf("expected searchQuery 'rain', got %q", engine.searchQuery)
+	}
+
+	// Press Enter to confirm search
+	engine.handleInput('\r')
+	if engine.searching {
+		t.Errorf("expected engine.searching to be false after Enter")
+	}
+	if engine.activeQuery != "rain" {
+		t.Errorf("expected activeQuery 'rain', got %q", engine.activeQuery)
+	}
+	if len(engine.searchMatches) != 1 {
+		t.Fatalf("expected 1 match for 'rain', got %d", len(engine.searchMatches))
+	}
+
+	// Press Esc to clear search
+	engine.handleInput(27)
+	if engine.activeQuery != "" || len(engine.searchMatches) != 0 {
+		t.Errorf("expected Esc to clear active search query and matches")
+	}
+}
+
+func TestEngineSearchPatternNotFound(t *testing.T) {
+	var buf bytes.Buffer
+	cfg := DefaultConfig()
+	cfg.FileContent = []byte("short content")
+
+	engine := NewEngine(cfg, &buf)
+	engine.resize(40, 10)
+
+	engine.searchQuery = "nonexistent_pattern"
+	engine.executeSearch()
+
+	if len(engine.searchMatches) != 0 {
+		t.Errorf("expected 0 matches for nonexistent pattern, got %d", len(engine.searchMatches))
+	}
+	if !strings.Contains(engine.searchStatus, "Pattern not found") {
+		t.Errorf("expected 'Pattern not found' in searchStatus, got %q", engine.searchStatus)
+	}
+}
+
+func TestEngineSearchRenderHighlight(t *testing.T) {
+	var buf bytes.Buffer
+	cfg := DefaultConfig()
+	cfg.FileContent = []byte("func main() {\n\treturn 42\n}")
+	cfg.SyntaxHighlight = false
+
+	engine := NewEngine(cfg, &buf)
+	engine.resize(30, 8)
+
+	engine.searchQuery = "main"
+	engine.executeSearch()
+
+	engine.render()
+	output := buf.String()
+
+	// Output should contain active search highlight color 255;235;59
+	if !strings.Contains(output, "255;235;59") {
+		t.Errorf("expected active search highlight ANSI sequence (255;235;59) in render output")
+	}
+
+	// Output should contain search status bar
+	if !strings.Contains(output, "[1/1] /main") {
+		t.Errorf("expected search status bar '[1/1] /main' in render output")
+	}
+}
+
 func stripANSI(s string) string {
 	var sb strings.Builder
 	inEsc := false

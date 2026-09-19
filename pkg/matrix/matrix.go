@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -23,6 +24,22 @@ const (
 	keyHome     = 1005
 	keyEnd      = 1006
 )
+
+// SearchMatch represents an occurrence of a search query in wrapped lines.
+type SearchMatch struct {
+	Index int // 0-based match index
+	Line  int // Line index in wrapped lines
+	Col   int // Column offset in wrapped line
+	Len   int // Match length in runes
+}
+
+// TargetCell stores character, syntax color, and document position for a grid cell.
+type TargetCell struct {
+	Rune    rune
+	Color   string
+	DocLine int
+	Col     int
+}
 
 // Config encapsulates runtime parameters for the Matrix rain simulation.
 type Config struct {
@@ -79,11 +96,20 @@ type Engine struct {
 	termState        *term.State
 	ttyFile          *os.File
 	textBuf          *TextBuffer
-	targetGrid       [][]StyledRune
+	targetGrid       [][]TargetCell
 	textDrops        []*TextDrop
 	scrollOffset     int
 	syntaxHighlight  bool
 	syntaxThemeIndex int
+
+	// Search state
+	searching     bool
+	searchQuery   string
+	activeQuery   string
+	searchMatches []SearchMatch
+	matchesByLine map[int][]SearchMatch
+	currentMatch  int
+	searchStatus  string
 }
 
 // NewEngine constructs a matrix simulation engine.
@@ -137,6 +163,8 @@ func NewEngine(cfg Config, out io.Writer) *Engine {
 		textBuf:          textBuf,
 		syntaxHighlight:  cfg.SyntaxHighlight,
 		syntaxThemeIndex: syntaxThemeIdx,
+		currentMatch:     -1,
+		matchesByLine:    make(map[int][]SearchMatch),
 	}
 }
 
@@ -239,6 +267,9 @@ func (e *Engine) resize(newW, newH int) {
 	e.height = newH
 
 	if e.isTextMode() {
+		if e.activeQuery != "" {
+			e.findMatches(e.activeQuery)
+		}
 		e.rebuildTargetGrid()
 		e.rebuildTextDrops()
 	} else {
@@ -253,16 +284,27 @@ func (e *Engine) resize(newW, newH int) {
 	}
 }
 
+// textViewHeight returns the screen rows available for text lines, reserving the bottom row for search/status bar.
+func (e *Engine) textViewHeight() int {
+	if e.isTextMode() && (e.searching || e.activeQuery != "" || e.searchStatus != "") {
+		if e.height > 1 {
+			return e.height - 1
+		}
+	}
+	return e.height
+}
+
 // maxScrollOffset returns the maximum allowed scroll offset given current height.
 func (e *Engine) maxScrollOffset() int {
 	if e.textBuf == nil {
 		return 0
 	}
+	viewH := e.textViewHeight()
 	total := e.textBuf.TotalLines(e.width)
-	if total <= e.height {
+	if total <= viewH {
 		return 0
 	}
-	return total - e.height
+	return total - viewH
 }
 
 // rebuildTargetGrid computes target rune positions for the current visible window.
@@ -271,6 +313,7 @@ func (e *Engine) rebuildTargetGrid() {
 		return
 	}
 
+	viewH := e.textViewHeight()
 	wrapped := e.textBuf.Wrap(e.width)
 	numLines := len(wrapped)
 
@@ -282,7 +325,7 @@ func (e *Engine) rebuildTargetGrid() {
 		e.scrollOffset = 0
 	}
 
-	end := e.scrollOffset + e.height
+	end := e.scrollOffset + viewH
 	if end > numLines {
 		end = numLines
 	}
@@ -302,7 +345,7 @@ func (e *Engine) rebuildTargetGrid() {
 				maxLen = len(line)
 			}
 		}
-		startRow = (e.height - len(visible)) / 2
+		startRow = (viewH - len(visible)) / 2
 		if startRow < 0 {
 			startRow = 0
 		}
@@ -312,23 +355,29 @@ func (e *Engine) rebuildTargetGrid() {
 		}
 	}
 
-	target := make([][]StyledRune, e.height)
+	target := make([][]TargetCell, e.height)
 	for r := range target {
-		target[r] = make([]StyledRune, e.width)
+		target[r] = make([]TargetCell, e.width)
 	}
 
 	for i, line := range visible {
 		r := startRow + i
-		if r >= e.height {
+		if r >= viewH {
 			break
 		}
+		docLine := e.scrollOffset + i
 		for j, sr := range line {
 			c := startCol + j
 			if c >= e.width {
 				break
 			}
 			if sr.Rune != ' ' {
-				target[r][c] = sr
+				target[r][c] = TargetCell{
+					Rune:    sr.Rune,
+					Color:   sr.Color,
+					DocLine: docLine,
+					Col:     j,
+				}
 			}
 		}
 	}
@@ -435,6 +484,142 @@ func (e *Engine) scrollTo(offset int) {
 	}
 }
 
+// findMatches searches the wrapped text lines for all occurrences of the query.
+func (e *Engine) findMatches(query string) {
+	e.searchMatches = nil
+	e.matchesByLine = make(map[int][]SearchMatch)
+	if query == "" || e.textBuf == nil {
+		e.currentMatch = -1
+		return
+	}
+
+	wrapped := e.textBuf.Wrap(e.width)
+	queryLower := strings.ToLower(query)
+	queryRunes := []rune(queryLower)
+	queryLen := len(queryRunes)
+	if queryLen == 0 {
+		return
+	}
+
+	matchIdx := 0
+	for lineIdx, line := range wrapped {
+		lineRunes := make([]rune, len(line))
+		for i, sr := range line {
+			lineRunes[i] = sr.Rune
+		}
+		lineLower := strings.ToLower(string(lineRunes))
+		lineLowerRunes := []rune(lineLower)
+
+		for i := 0; i <= len(lineLowerRunes)-queryLen; i++ {
+			matched := true
+			for j := 0; j < queryLen; j++ {
+				if lineLowerRunes[i+j] != queryRunes[j] {
+					matched = false
+					break
+				}
+			}
+			if matched {
+				m := SearchMatch{
+					Index: matchIdx,
+					Line:  lineIdx,
+					Col:   i,
+					Len:   queryLen,
+				}
+				e.searchMatches = append(e.searchMatches, m)
+				e.matchesByLine[lineIdx] = append(e.matchesByLine[lineIdx], m)
+				matchIdx++
+			}
+		}
+	}
+
+	if len(e.searchMatches) > 0 {
+		if e.currentMatch < 0 || e.currentMatch >= len(e.searchMatches) {
+			e.currentMatch = 0
+		}
+	} else {
+		e.currentMatch = -1
+	}
+}
+
+// isMatch reports whether the cell at (docLine, col) is part of any match, and whether it is the active match.
+func (e *Engine) isMatch(docLine int, col int) (bool, bool) {
+	lineMatches, ok := e.matchesByLine[docLine]
+	if !ok || len(lineMatches) == 0 {
+		return false, false
+	}
+	for _, m := range lineMatches {
+		if col >= m.Col && col < m.Col+m.Len {
+			return true, m.Index == e.currentMatch
+		}
+	}
+	return false, false
+}
+
+// executeSearch initiates a search for the current searchQuery, jumps to the first match, and fast-forwards rain.
+func (e *Engine) executeSearch() {
+	if e.searchQuery == "" {
+		return
+	}
+	e.activeQuery = e.searchQuery
+	e.findMatches(e.activeQuery)
+
+	if len(e.searchMatches) > 0 {
+		e.currentMatch = 0
+		e.searchStatus = ""
+		e.fastForwardTextRain()
+		e.scrollToMatch(e.searchMatches[0])
+	} else {
+		e.currentMatch = -1
+		e.searchStatus = fmt.Sprintf("Pattern not found: %s", e.activeQuery)
+		e.rebuildTargetGrid()
+	}
+}
+
+// scrollToMatch scrolls the viewport so the specified match is visible with context.
+func (e *Engine) scrollToMatch(match SearchMatch) {
+	viewH := e.textViewHeight()
+	desired := match.Line - viewH/3
+	if desired < 0 {
+		desired = 0
+	}
+	maxOffset := e.maxScrollOffset()
+	if desired > maxOffset {
+		desired = maxOffset
+	}
+	e.scrollOffset = desired
+	e.rebuildTargetGrid()
+}
+
+// nextMatch jumps to the next search occurrence, wrapping around if at the end.
+func (e *Engine) nextMatch() {
+	if len(e.searchMatches) == 0 {
+		if e.activeQuery != "" {
+			e.searchStatus = fmt.Sprintf("Pattern not found: %s", e.activeQuery)
+			e.rebuildTargetGrid()
+		}
+		return
+	}
+	e.currentMatch = (e.currentMatch + 1) % len(e.searchMatches)
+	e.searchStatus = ""
+	e.fastForwardTextRain()
+	e.scrollToMatch(e.searchMatches[e.currentMatch])
+}
+
+// prevMatch jumps to the previous search occurrence, wrapping around if at the start.
+func (e *Engine) prevMatch() {
+	if len(e.searchMatches) == 0 {
+		if e.activeQuery != "" {
+			e.searchStatus = fmt.Sprintf("Pattern not found: %s", e.activeQuery)
+			e.rebuildTargetGrid()
+		}
+		return
+	}
+	e.currentMatch = (e.currentMatch - 1 + len(e.searchMatches)) % len(e.searchMatches)
+	e.searchStatus = ""
+	e.fastForwardTextRain()
+	e.scrollToMatch(e.searchMatches[e.currentMatch])
+}
+
 // step advances all simulation streams by one frame.
 func (e *Engine) step() {
 	if e.isTextMode() {
@@ -524,22 +709,31 @@ func (e *Engine) renderTextMode() {
 		grid[r] = make([]Cell, e.width)
 	}
 
+	viewH := e.textViewHeight()
+
 	for x := 0; x < e.width; x++ {
 		var drop *TextDrop
 		if x < len(e.textDrops) {
 			drop = e.textDrops[x]
 		}
 
-		for y := 0; y < e.height; y++ {
-			var target StyledRune
+		for y := 0; y < viewH; y++ {
+			var target TargetCell
 			if y < len(e.targetGrid) && x < len(e.targetGrid[y]) {
 				target = e.targetGrid[y][x]
 			}
 
-			// Determine settled color: syntax color if enabled and available, else theme settled color
+			// Determine settled color: search highlight takes precedence, then syntax, then theme
 			settledColor := ""
 			if target.Rune != 0 {
-				if e.syntaxHighlight && target.Color != "" {
+				isMatched, isActive := e.isMatch(target.DocLine, target.Col)
+				if isMatched {
+					if isActive {
+						settledColor = "\x1b[1;30;48;2;255;235;59m" // Bold black on gold (active match)
+					} else {
+						settledColor = "\x1b[1;30;48;2;255;160;0m"  // Bold black on amber (other match)
+					}
+				} else if e.syntaxHighlight && target.Color != "" {
 					settledColor = target.Color
 				} else {
 					settledColor = e.theme.SettledColor(x)
@@ -609,6 +803,42 @@ func (e *Engine) renderTextMode() {
 		}
 	}
 
+	// Render bottom search / status bar if active
+	if viewH < e.height {
+		bottomRow := e.height - 1
+		var promptStr string
+		var promptColor string
+
+		if e.searching {
+			promptStr = "/" + e.searchQuery + "_"
+			promptColor = "\x1b[1;37;48;2;35;35;35m" // Bold white on dark charcoal
+		} else if e.searchStatus != "" {
+			promptStr = e.searchStatus
+			promptColor = "\x1b[1;37;48;2;160;30;30m" // Bold white on dark crimson
+		} else if e.activeQuery != "" {
+			if len(e.searchMatches) > 0 {
+				promptStr = fmt.Sprintf("[%d/%d] /%s  (n: next, p: prev, /: search, Esc: clear)",
+					e.currentMatch+1, len(e.searchMatches), e.activeQuery)
+				promptColor = "\x1b[1;30;48;2;210;210;210m" // Crisp dark text on silver
+			} else {
+				promptStr = fmt.Sprintf("Pattern not found: %s", e.activeQuery)
+				promptColor = "\x1b[1;37;48;2;160;30;30m"
+			}
+		}
+
+		promptRunes := []rune(promptStr)
+		for x := 0; x < e.width; x++ {
+			r := ' '
+			if x < len(promptRunes) {
+				r = promptRunes[x]
+			}
+			grid[bottomRow][x] = Cell{
+				Rune:  r,
+				Color: promptColor,
+			}
+		}
+	}
+
 	e.flushGrid(grid)
 }
 
@@ -620,7 +850,7 @@ func (e *Engine) flushGrid(grid [][]Cell) {
 	for y := 0; y < e.height; y++ {
 		for x := 0; x < e.width; x++ {
 			cell := grid[y][x]
-			if cell.Rune == 0 || cell.Rune == ' ' {
+			if cell.Rune == 0 || (cell.Rune == ' ' && cell.Color == "") {
 				if currentColor != "" {
 					_, _ = e.writer.WriteString("\x1b[0m")
 					currentColor = ""
@@ -655,11 +885,72 @@ func (e *Engine) handleInput(key int) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	// If currently typing in search prompt
+	if e.searching {
+		switch key {
+		case 27, 3: // ESC or Ctrl+C cancels search prompt
+			e.searching = false
+			e.searchQuery = ""
+			e.rebuildTargetGrid()
+			return false
+
+		case '\r', '\n': // Enter confirms search
+			e.searching = false
+			e.executeSearch()
+			return false
+
+		case 127, 8: // Backspace
+			runes := []rune(e.searchQuery)
+			if len(runes) > 0 {
+				e.searchQuery = string(runes[:len(runes)-1])
+			}
+			return false
+
+		default:
+			if key >= 32 && key < 1000 {
+				e.searchQuery += string(rune(key))
+			}
+			return false
+		}
+	}
+
+	// Normal navigation mode
 	switch key {
-	case 'q', 'Q', 3, 27: // 'q', 'Q', Ctrl+C (0x03), ESC (0x1b)
+	case 'q', 'Q', 3: // 'q', 'Q', Ctrl+C exits
 		return true
 
-	case '\r', '\n': // Enter key
+	case 27: // ESC key
+		// If search is active, ESC clears search highlights; otherwise ESC exits
+		if e.isTextMode() && (e.activeQuery != "" || e.searchStatus != "") {
+			e.activeQuery = ""
+			e.searchMatches = nil
+			e.matchesByLine = nil
+			e.currentMatch = -1
+			e.searchStatus = ""
+			e.rebuildTargetGrid()
+			return false
+		}
+		return true
+
+	case '/': // Enter search mode
+		if e.isTextMode() {
+			e.searching = true
+			e.searchQuery = ""
+			e.searchStatus = ""
+			e.rebuildTargetGrid()
+		}
+
+	case 'n': // Next search match
+		if e.isTextMode() {
+			e.nextMatch()
+		}
+
+	case 'p', 'N': // Previous search match
+		if e.isTextMode() {
+			e.prevMatch()
+		}
+
+	case '\r', '\n': // Enter key in normal mode
 		if e.isTextMode() {
 			if !e.allTextDropsDone() {
 				e.fastForwardTextRain()
@@ -729,12 +1020,12 @@ func (e *Engine) handleInput(key int) bool {
 
 	case 'd', 'D', keyPageDown:
 		if e.isTextMode() {
-			e.scrollDown(e.height / 2)
+			e.scrollDown(e.textViewHeight() / 2)
 		}
 
 	case 'u', 'U', keyPageUp:
 		if e.isTextMode() {
-			e.scrollUp(e.height / 2)
+			e.scrollUp(e.textViewHeight() / 2)
 		}
 
 	case 'g', keyHome:

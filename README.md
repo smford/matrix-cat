@@ -20,6 +20,7 @@ High-performance, authentic *The Matrix* digital rain simulator for the terminal
 - **Text File Rain Viewer with Syntax Highlighting**:
   - Pass any text or source code file to have its characters rain down from the top of the screen and settle in place.
   - **Full Syntax Highlighting**: Automatically detects 200+ programming languages (Go, Python, Rust, JavaScript, TypeScript, C/C++, JSON, YAML, Markdown, Bash, etc.) using Chroma.
+  - **Vim-Style In-File Search (`/`)**: Search files interactively with `/`, automatically jump to matches, navigate forward with `n`, backward with `p`, and highlight matching occurrences in high-contrast gold and amber.
   - **Live Palette & Syntax Controls**: Toggle between Matrix monochrome and syntax colors with `s`, and cycle syntax themes (Monokai, Dracula, Nord, Solarized Dark, GitHub Dark, Fruity, Native) with `t`.
   - Interactive scrolling (`j`/`k`, arrow keys, PageUp/PageDown, Home/End) for files exceeding terminal dimensions.
   - Fast-forward to instant settled view with `Enter`, or replay rain with `r`.
@@ -150,7 +151,11 @@ cat script.sh | matrix-cat -
 
 | Key | Action |
 |---|---|
-| `q`, `Esc`, `Ctrl+C` | Gracefully quit and restore terminal |
+| `q`, `Ctrl+C` | Gracefully quit and restore terminal |
+| `Esc` | Clear search prompt / highlights, or quit if no active search |
+| `/` | Start vim-style in-file search (type pattern + `Enter`) |
+| `n` | Jump to next search match |
+| `p` / `N` | Jump to previous search match |
 | `Space` | Pause / Resume animation |
 | `Enter` | Fast-forward rain / settle text immediately |
 | `s` | Toggle syntax highlighting on / off |

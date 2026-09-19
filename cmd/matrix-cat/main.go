@@ -46,6 +46,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  c              : Cycle Matrix rain palettes\n")
 		fmt.Fprintf(os.Stderr, "  s              : Toggle syntax highlighting on / off\n")
 		fmt.Fprintf(os.Stderr, "  t              : Cycle syntax highlighting themes\n")
+		fmt.Fprintf(os.Stderr, "  /              : Search text (type query and press Enter)\n")
+		fmt.Fprintf(os.Stderr, "  n / p          : Jump to next / previous search match\n")
 		fmt.Fprintf(os.Stderr, "  + / -          : Increase / Decrease density & speed\n")
 		fmt.Fprintf(os.Stderr, "  r              : Reset rain streams\n")
 		fmt.Fprintf(os.Stderr, "  Enter          : Fast-forward rain / Settle text immediately\n")
