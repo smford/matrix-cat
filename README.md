@@ -17,8 +17,10 @@ High-performance, authentic *The Matrix* digital rain simulator for the terminal
   - Half-width Katakana glyphs (single column width for crisp alignment), numerals, Latin characters, and symbols.
   - Glowing head characters with customizable 24-bit truecolor fading gradients.
   - In-place glyph mutations as characters cascade down the screen.
-- **Text File Rain Viewer**:
-  - Pass any text file to have its characters rain down from the top of the screen into place with authentic Matrix cascading streams.
+- **Text File Rain Viewer with Syntax Highlighting**:
+  - Pass any text or source code file to have its characters rain down from the top of the screen and settle in place.
+  - **Full Syntax Highlighting**: Automatically detects 200+ programming languages (Go, Python, Rust, JavaScript, TypeScript, C/C++, JSON, YAML, Markdown, Bash, etc.) using Chroma.
+  - **Live Palette & Syntax Controls**: Toggle between Matrix monochrome and syntax colors with `s`, and cycle syntax themes (Monokai, Dracula, Nord, Solarized Dark, GitHub Dark, Fruity, Native) with `t`.
   - Interactive scrolling (`j`/`k`, arrow keys, PageUp/PageDown, Home/End) for files exceeding terminal dimensions.
   - Fast-forward to instant settled view with `Enter`, or replay rain with `r`.
   - Automatic tab expansion with configurable tab width (`-tabwidth`).
@@ -111,6 +113,8 @@ matrix-cat myfile.txt | grep "pattern"
 |---|---|---|---|
 | `-color` | string | `green` | Palette: `green`, `cyan`, `amber`, `red`, `white`, `rainbow` |
 | `-charset` | string | `matrix` | Character set: `matrix`, `ascii`, `binary`, `hex` |
+| `-syntax` | bool | `true` | Enable syntax highlighting for code and structured files |
+| `-syntax-theme` | string | `monokai` | Theme: `monokai`, `dracula`, `nord`, `solarized-dark`, `github-dark`, `fruity`, `native` |
 | `-center` | bool | `false` | Center text horizontally and vertically on screen |
 | `-loop` | bool | `false` | Keep ambient rain falling around text after settling |
 | `-tabwidth` | int | `4` | Number of spaces for tab expansion (1–16) |
@@ -124,17 +128,20 @@ matrix-cat myfile.txt | grep "pattern"
 #### Examples
 
 ```bash
-# Rain down a text file in classic green Matrix style
-matrix-cat poem.txt
+# Rain down source code with Monokai syntax highlighting
+matrix-cat main.go
+
+# Rain down code with Dracula syntax theme in cyan rain
+matrix-cat -color cyan -syntax-theme dracula app.py
 
 # Centered ASCII banner in CRT amber phosphor
 matrix-cat -center -color amber banner.txt
 
-# Cyan binary rain revealing code
-matrix-cat -color cyan -charset binary main.go
+# Disable syntax highlighting for pure monochrome Matrix rain
+matrix-cat -syntax=false server.rs
 
-# High-density fast rain at 60 FPS
-matrix-cat -density 75 -fps 60 -speed 1.5 document.txt
+# Read from standard input
+cat script.sh | matrix-cat -
 ```
 
 ---
@@ -146,7 +153,9 @@ matrix-cat -density 75 -fps 60 -speed 1.5 document.txt
 | `q`, `Esc`, `Ctrl+C` | Gracefully quit and restore terminal |
 | `Space` | Pause / Resume animation |
 | `Enter` | Fast-forward rain / settle text immediately |
-| `c` | Cycle color themes |
+| `s` | Toggle syntax highlighting on / off |
+| `t` | Cycle syntax highlighting themes (Monokai, Dracula, Nord, etc.) |
+| `c` | Cycle Matrix rain palettes (Green, Cyan, Amber, Red, White, Rainbow) |
 | `+` / `-` | Increase / Decrease speed and density |
 | `r` | Reset and replay rain streams |
 | `j`, `k`, `↓`, `↑` | Scroll text up / down (when file exceeds screen) |

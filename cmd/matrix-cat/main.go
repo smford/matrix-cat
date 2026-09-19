@@ -31,6 +31,8 @@ func main() {
 	center := flag.Bool("center", false, "Center text horizontally and vertically on screen")
 	loop := flag.Bool("loop", false, "Keep ambient rain falling continuously around text")
 	tabWidth := flag.Int("tabwidth", 4, "Number of spaces for tab expansion (1-16)")
+	syntax := flag.Bool("syntax", true, "Enable syntax highlighting for code and structured files")
+	syntaxTheme := flag.String("syntax-theme", "monokai", "Syntax highlighting theme: monokai, dracula, nord, solarized-dark, github-dark, fruity, native")
 	flagFile := flag.String("file", "", "Path to text file to display (or pass as positional argument)")
 	showVersion := flag.Bool("version", false, "Display version and build information")
 
@@ -41,7 +43,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\nControls:\n")
 		fmt.Fprintf(os.Stderr, "  q, Esc, Ctrl+C : Quit\n")
 		fmt.Fprintf(os.Stderr, "  Space          : Pause / Resume animation\n")
-		fmt.Fprintf(os.Stderr, "  c              : Cycle color schemes\n")
+		fmt.Fprintf(os.Stderr, "  c              : Cycle Matrix rain palettes\n")
+		fmt.Fprintf(os.Stderr, "  s              : Toggle syntax highlighting on / off\n")
+		fmt.Fprintf(os.Stderr, "  t              : Cycle syntax highlighting themes\n")
 		fmt.Fprintf(os.Stderr, "  + / -          : Increase / Decrease density & speed\n")
 		fmt.Fprintf(os.Stderr, "  r              : Reset rain streams\n")
 		fmt.Fprintf(os.Stderr, "  Enter          : Fast-forward rain / Settle text immediately\n")
@@ -95,9 +99,11 @@ func main() {
 		BoldHead:    *boldHead,
 		FilePath:    filePath,
 		FileContent: fileContent,
-		Center:      *center,
-		Loop:        *loop,
-		TabWidth:    *tabWidth,
+		Center:          *center,
+		Loop:            *loop,
+		TabWidth:        *tabWidth,
+		SyntaxHighlight: *syntax,
+		SyntaxTheme:     *syntaxTheme,
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -8,14 +8,18 @@ import (
 
 func TestNewTextBuffer(t *testing.T) {
 	input := "Line 1\nLine\t2\r\nLine 3\n"
-	tb := NewTextBuffer([]byte(input), 4)
+	tb := NewTextBuffer([]byte(input), "test.txt", false, "monokai", 4)
 
 	if tb.RawLineCount() != 3 {
 		t.Fatalf("expected 3 lines, got %d", tb.RawLineCount())
 	}
 
 	// Line 2 had a tab after "Line" (4 chars) -> next tab stop is col 4 -> 4 spaces
-	line2 := string(tb.rawLines[1])
+	var runes []rune
+	for _, sr := range tb.rawLines[1] {
+		runes = append(runes, sr.Rune)
+	}
+	line2 := string(runes)
 	expectedLine2 := "Line    2"
 	if line2 != expectedLine2 {
 		t.Errorf("tab expansion failed: got %q, want %q", line2, expectedLine2)
@@ -24,7 +28,7 @@ func TestNewTextBuffer(t *testing.T) {
 
 func TestTextBufferWrap(t *testing.T) {
 	input := "Short line\nThis is a rather long line that needs to wrap across terminal columns"
-	tb := NewTextBuffer([]byte(input), 4)
+	tb := NewTextBuffer([]byte(input), "test.txt", false, "monokai", 4)
 
 	// Wrap at 20 characters
 	wrapped := tb.Wrap(20)
@@ -34,7 +38,7 @@ func TestTextBufferWrap(t *testing.T) {
 
 	for i, l := range wrapped {
 		if len(l) > 20 {
-			t.Errorf("line %d exceeds max width 20: len=%d (%q)", i, len(l), string(l))
+			t.Errorf("line %d exceeds max width 20: len=%d", i, len(l))
 		}
 	}
 
@@ -78,11 +82,62 @@ func TestNewTextDrop(t *testing.T) {
 	}
 }
 
+func TestSyntaxHighlighting(t *testing.T) {
+	goCode := `package main
+
+import "fmt"
+
+// main entry point
+func main() {
+	x := 42
+	fmt.Println("Matrix", x)
+}
+`
+	tb := NewTextBuffer([]byte(goCode), "main.go", true, "monokai", 4)
+	if tb.RawLineCount() == 0 {
+		t.Fatalf("expected parsed lines, got 0")
+	}
+
+	// Verify keywords and literals have ANSI color codes attached
+	hasColoredRunes := false
+	for _, line := range tb.rawLines {
+		for _, sr := range line {
+			if sr.Color != "" && strings.Contains(sr.Color, "\x1b[") {
+				hasColoredRunes = true
+				break
+			}
+		}
+		if hasColoredRunes {
+			break
+		}
+	}
+
+	if !hasColoredRunes {
+		t.Errorf("expected syntax highlighted runes to have ANSI colors, found none")
+	}
+
+	// Test SetSyntax toggle
+	tb.SetSyntax(false, "monokai")
+	allBlankColors := true
+	for _, line := range tb.rawLines {
+		for _, sr := range line {
+			if sr.Color != "" {
+				allBlankColors = false
+				break
+			}
+		}
+	}
+	if !allBlankColors {
+		t.Errorf("expected all colors to be empty when syntax highlighting is disabled")
+	}
+}
+
 func TestEngineTextModeRenderAndSettle(t *testing.T) {
 	var buf bytes.Buffer
 	cfg := DefaultConfig()
 	cfg.FileContent = []byte("HELLO MATRIX\nSECOND LINE")
 	cfg.ThemeName = "green"
+	cfg.SyntaxHighlight = false
 
 	engine := NewEngine(cfg, &buf)
 	if !engine.isTextMode() {
@@ -109,6 +164,42 @@ func TestEngineTextModeRenderAndSettle(t *testing.T) {
 	}
 	if !strings.Contains(cleanOutput, "SECOND LINE") {
 		t.Errorf("settled render output should contain 'SECOND LINE', got:\n%s", cleanOutput)
+	}
+}
+
+func TestEngineSyntaxToggleAndThemeCycle(t *testing.T) {
+	var buf bytes.Buffer
+	cfg := DefaultConfig()
+	cfg.FilePath = "main.go"
+	cfg.FileContent = []byte("package main\nfunc test() {}")
+	cfg.SyntaxHighlight = true
+	cfg.SyntaxTheme = "monokai"
+
+	engine := NewEngine(cfg, &buf)
+	engine.resize(40, 10)
+	engine.fastForwardTextRain()
+
+	if !engine.syntaxHighlight {
+		t.Errorf("expected syntaxHighlight to be initially true")
+	}
+
+	// Toggle off with 's'
+	engine.handleInput('s')
+	if engine.syntaxHighlight {
+		t.Errorf("expected syntaxHighlight to be false after 's'")
+	}
+
+	// Toggle on with 's'
+	engine.handleInput('s')
+	if !engine.syntaxHighlight {
+		t.Errorf("expected syntaxHighlight to be true after second 's'")
+	}
+
+	// Cycle theme with 't'
+	initialTheme := engine.cfg.SyntaxTheme
+	engine.handleInput('t')
+	if engine.cfg.SyntaxTheme == initialTheme {
+		t.Errorf("expected syntax theme to cycle after 't'")
 	}
 }
 

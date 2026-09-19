@@ -26,29 +26,33 @@ const (
 
 // Config encapsulates runtime parameters for the Matrix rain simulation.
 type Config struct {
-	FPS         int
-	Density     int     // 1 - 100
-	SpeedScale  float64 // Multiplier for drop speeds (e.g., 0.5x - 3.0x)
-	ThemeName   string
-	CharSetName string
-	BoldHead    bool
-	FilePath    string  // Optional path to text file
-	FileContent []byte  // Optional raw text content
-	Center      bool    // Center text on screen
-	Loop        bool    // Keep ambient rain falling after text settles
-	TabWidth    int     // Width of tab expansion (default 4)
+	FPS             int
+	Density         int     // 1 - 100
+	SpeedScale      float64 // Multiplier for drop speeds (e.g., 0.5x - 3.0x)
+	ThemeName       string
+	CharSetName     string
+	BoldHead        bool
+	FilePath        string  // Optional path to text file
+	FileContent     []byte  // Optional raw text content
+	Center          bool    // Center text on screen
+	Loop            bool    // Keep ambient rain falling after text settles
+	TabWidth        int     // Width of tab expansion (default 4)
+	SyntaxHighlight bool    // Enable syntax highlighting (default true)
+	SyntaxTheme     string  // Syntax theme (e.g. monokai, dracula, nord, etc.)
 }
 
 // DefaultConfig returns production-ready default settings.
 func DefaultConfig() Config {
 	return Config{
-		FPS:         30,
-		Density:     50,
-		SpeedScale:  1.0,
-		ThemeName:   "green",
-		CharSetName: string(CharSetMatrix),
-		BoldHead:    true,
-		TabWidth:    4,
+		FPS:             30,
+		Density:         50,
+		SpeedScale:      1.0,
+		ThemeName:       "green",
+		CharSetName:     string(CharSetMatrix),
+		BoldHead:        true,
+		TabWidth:        4,
+		SyntaxHighlight: true,
+		SyntaxTheme:     "monokai",
 	}
 }
 
@@ -60,24 +64,26 @@ type Cell struct {
 
 // Engine drives the matrix rain simulation and rendering loop.
 type Engine struct {
-	cfg          Config
-	mu           sync.Mutex
-	width        int
-	height       int
-	columns      []*Column
-	pool         []rune
-	theme        Theme
-	themeIndex   int
-	paused       bool
-	writer       *bufio.Writer
-	stdinFd      int
-	stdoutFd     int
-	termState    *term.State
-	ttyFile      *os.File
-	textBuf      *TextBuffer
-	targetGrid   [][]rune
-	textDrops    []*TextDrop
-	scrollOffset int
+	cfg              Config
+	mu               sync.Mutex
+	width            int
+	height           int
+	columns          []*Column
+	pool             []rune
+	theme            Theme
+	themeIndex       int
+	paused           bool
+	writer           *bufio.Writer
+	stdinFd          int
+	stdoutFd         int
+	termState        *term.State
+	ttyFile          *os.File
+	textBuf          *TextBuffer
+	targetGrid       [][]StyledRune
+	textDrops        []*TextDrop
+	scrollOffset     int
+	syntaxHighlight  bool
+	syntaxThemeIndex int
 }
 
 // NewEngine constructs a matrix simulation engine.
@@ -94,6 +100,9 @@ func NewEngine(cfg Config, out io.Writer) *Engine {
 	if cfg.TabWidth <= 0 {
 		cfg.TabWidth = 4
 	}
+	if cfg.SyntaxTheme == "" {
+		cfg.SyntaxTheme = "monokai"
+	}
 
 	theme := GetThemeByName(cfg.ThemeName)
 	themeIdx := 0
@@ -106,18 +115,28 @@ func NewEngine(cfg Config, out io.Writer) *Engine {
 
 	var textBuf *TextBuffer
 	if len(cfg.FileContent) > 0 {
-		textBuf = NewTextBuffer(cfg.FileContent, cfg.TabWidth)
+		textBuf = NewTextBuffer(cfg.FileContent, cfg.FilePath, cfg.SyntaxHighlight, cfg.SyntaxTheme, cfg.TabWidth)
+	}
+
+	syntaxThemeIdx := 0
+	for i, st := range DefaultSyntaxThemes {
+		if st == cfg.SyntaxTheme {
+			syntaxThemeIdx = i
+			break
+		}
 	}
 
 	return &Engine{
-		cfg:        cfg,
-		pool:       GetCharPool(CharSet(cfg.CharSetName)),
-		theme:      theme,
-		themeIndex: themeIdx,
-		writer:     bufio.NewWriterSize(out, 64*1024), // 64KB render buffer
-		stdinFd:    int(os.Stdin.Fd()),
-		stdoutFd:   int(os.Stdout.Fd()),
-		textBuf:    textBuf,
+		cfg:              cfg,
+		pool:             GetCharPool(CharSet(cfg.CharSetName)),
+		theme:            theme,
+		themeIndex:       themeIdx,
+		writer:           bufio.NewWriterSize(out, 64*1024), // 64KB render buffer
+		stdinFd:          int(os.Stdin.Fd()),
+		stdoutFd:         int(os.Stdout.Fd()),
+		textBuf:          textBuf,
+		syntaxHighlight:  cfg.SyntaxHighlight,
+		syntaxThemeIndex: syntaxThemeIdx,
 	}
 }
 
@@ -268,7 +287,7 @@ func (e *Engine) rebuildTargetGrid() {
 		end = numLines
 	}
 
-	var visible [][]rune
+	var visible [][]StyledRune
 	if e.scrollOffset < numLines {
 		visible = wrapped[e.scrollOffset:end]
 	}
@@ -293,9 +312,9 @@ func (e *Engine) rebuildTargetGrid() {
 		}
 	}
 
-	target := make([][]rune, e.height)
+	target := make([][]StyledRune, e.height)
 	for r := range target {
-		target[r] = make([]rune, e.width)
+		target[r] = make([]StyledRune, e.width)
 	}
 
 	for i, line := range visible {
@@ -303,13 +322,13 @@ func (e *Engine) rebuildTargetGrid() {
 		if r >= e.height {
 			break
 		}
-		for j, ch := range line {
+		for j, sr := range line {
 			c := startCol + j
 			if c >= e.width {
 				break
 			}
-			if ch != ' ' {
-				target[r][c] = ch
+			if sr.Rune != ' ' {
+				target[r][c] = sr
 			}
 		}
 	}
@@ -512,17 +531,27 @@ func (e *Engine) renderTextMode() {
 		}
 
 		for y := 0; y < e.height; y++ {
-			var targetRune rune
+			var target StyledRune
 			if y < len(e.targetGrid) && x < len(e.targetGrid[y]) {
-				targetRune = e.targetGrid[y][x]
+				target = e.targetGrid[y][x]
+			}
+
+			// Determine settled color: syntax color if enabled and available, else theme settled color
+			settledColor := ""
+			if target.Rune != 0 {
+				if e.syntaxHighlight && target.Color != "" {
+					settledColor = target.Color
+				} else {
+					settledColor = e.theme.SettledColor(x)
+				}
 			}
 
 			if drop == nil || drop.Done {
 				// Settled state for this cell
-				if targetRune != 0 {
+				if target.Rune != 0 {
 					grid[y][x] = Cell{
-						Rune:  targetRune,
-						Color: e.theme.SettledColor(x),
+						Rune:  target.Rune,
+						Color: settledColor,
 					}
 				}
 				continue
@@ -537,7 +566,7 @@ func (e *Engine) renderTextMode() {
 
 			case headRow == y:
 				// Drop head is at this cell
-				r := targetRune
+				r := target.Rune
 				if r == 0 {
 					r = drop.Glyphs[0]
 				}
@@ -550,7 +579,7 @@ func (e *Engine) renderTextMode() {
 				// Inside trail
 				dist := headRow - y
 				color := e.theme.ColorAtPosition(dist, drop.Length, false)
-				r := targetRune
+				r := target.Rune
 				if r != 0 {
 					// 5% chance to shimmer with matrix rune
 					if randomInt(1, 100) <= 5 {
@@ -570,10 +599,10 @@ func (e *Engine) renderTextMode() {
 
 			case tailRow > y:
 				// Trail has passed: settled
-				if targetRune != 0 {
+				if target.Rune != 0 {
 					grid[y][x] = Cell{
-						Rune:  targetRune,
-						Color: e.theme.SettledColor(x),
+						Rune:  target.Rune,
+						Color: settledColor,
 					}
 				}
 			}
@@ -640,9 +669,28 @@ func (e *Engine) handleInput(key int) bool {
 	case ' ': // Pause / resume
 		e.paused = !e.paused
 
-	case 'c', 'C': // Cycle theme
+	case 'c', 'C': // Cycle Matrix theme palette
 		e.themeIndex = (e.themeIndex + 1) % len(AllThemes)
 		e.theme = AllThemes[e.themeIndex]
+
+	case 's', 'S': // Toggle syntax highlighting
+		if e.isTextMode() {
+			e.syntaxHighlight = !e.syntaxHighlight
+			if e.textBuf != nil {
+				e.textBuf.SetSyntax(e.syntaxHighlight, e.cfg.SyntaxTheme)
+				e.rebuildTargetGrid()
+			}
+		}
+
+	case 't', 'T': // Cycle syntax theme
+		if e.isTextMode() {
+			e.syntaxThemeIndex = (e.syntaxThemeIndex + 1) % len(DefaultSyntaxThemes)
+			e.cfg.SyntaxTheme = DefaultSyntaxThemes[e.syntaxThemeIndex]
+			if e.textBuf != nil {
+				e.textBuf.SetSyntax(e.syntaxHighlight, e.cfg.SyntaxTheme)
+				e.rebuildTargetGrid()
+			}
+		}
 
 	case '+', '=': // Increase speed & density
 		if e.cfg.SpeedScale < 3.0 {
