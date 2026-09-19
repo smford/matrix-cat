@@ -5,21 +5,21 @@
 class Mcat < Formula
   desc "Authentic Matrix digital rain terminal simulator and text viewer written in Go"
   homepage "https://smford.github.io/matrix-cat"
-  version "1.0.0"
+  version "1.1.0"
   license "MIT"
 
   on_macos do
-    if Hardware::CPU.arm?
-      url "https://github.com/smford/matrix-cat/releases/download/v1.0.0/mcat_1.0.0_darwin_arm64.tar.gz"
-      sha256 "PLACEHOLDER_SHA256_DARWIN_ARM64"
+    if Hardware::CPU.intel?
+      url "https://github.com/smford/matrix-cat/releases/download/v1.1.0/mcat_1.1.0_darwin_amd64.tar.gz"
+      sha256 "b8634fa538df067d37d5f0e4a5e81d0e9fc61c74b09bf67000876304ff2c4f22"
 
       def install
         bin.install "mcat"
       end
     end
-    if Hardware::CPU.intel?
-      url "https://github.com/smford/matrix-cat/releases/download/v1.0.0/mcat_1.0.0_darwin_amd64.tar.gz"
-      sha256 "PLACEHOLDER_SHA256_DARWIN_AMD64"
+    if Hardware::CPU.arm?
+      url "https://github.com/smford/matrix-cat/releases/download/v1.1.0/mcat_1.1.0_darwin_arm64.tar.gz"
+      sha256 "8a1e7dd5f714568a24512be00752fdba35fef5d02788fde568bf08dfc6648859"
 
       def install
         bin.install "mcat"
@@ -28,17 +28,17 @@ class Mcat < Formula
   end
 
   on_linux do
-    if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-      url "https://github.com/smford/matrix-cat/releases/download/v1.0.0/mcat_1.0.0_linux_arm64.tar.gz"
-      sha256 "PLACEHOLDER_SHA256_LINUX_ARM64"
+    if Hardware::CPU.intel? && Hardware::CPU.is_64_bit?
+      url "https://github.com/smford/matrix-cat/releases/download/v1.1.0/mcat_1.1.0_linux_amd64.tar.gz"
+      sha256 "b8df92df42e7de18671a447f364929709b6fe6ed499b1cee436238346cd4bda6"
 
       def install
         bin.install "mcat"
       end
     end
-    if Hardware::CPU.intel? && Hardware::CPU.is_64_bit?
-      url "https://github.com/smford/matrix-cat/releases/download/v1.0.0/mcat_1.0.0_linux_amd64.tar.gz"
-      sha256 "PLACEHOLDER_SHA256_LINUX_AMD64"
+    if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
+      url "https://github.com/smford/matrix-cat/releases/download/v1.1.0/mcat_1.1.0_linux_arm64.tar.gz"
+      sha256 "2308e2747c58c7cc93a5ad1a56692d070b567d341364f8e06a5fbc7bc3e22ff7"
 
       def install
         bin.install "mcat"
